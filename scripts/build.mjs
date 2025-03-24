@@ -4,7 +4,7 @@ import stylus from 'stylus';
 import * as ejs from 'ejs';
 import UglifyJS from 'uglify-js';
 import { create } from 'markdown-to-html-cli';
-import _ from 'colors-cli/toxic.js';
+import _ from 'colors-cli/toxic';
 
 const deployDir = path.resolve(process.cwd(), '.deploy');
 const faviconPath = path.resolve(process.cwd(), 'template', 'img', 'favicon.ico');
@@ -12,6 +12,7 @@ const rootIndexJSPath = path.resolve(process.cwd(), 'template', 'js', 'index.js'
 const dataJsonPath = path.resolve(process.cwd(), 'dist', 'data.json');
 const dataJsonMinPath = path.resolve(process.cwd(), 'dist', 'data.min.json');
 const cssPath = path.resolve(deployDir, 'css', 'index.css');
+const contributorsPath = path.resolve(process.cwd(), 'CONTRIBUTORS.svg');
 
 ;(async () => {
   try {
@@ -22,6 +23,11 @@ const cssPath = path.resolve(deployDir, 'css', 'index.css');
     await FS.ensureDir(path.resolve(deployDir, 'css'));
     await FS.ensureDir(path.resolve(deployDir, 'c'));
     await FS.copySync(faviconPath, path.resolve(deployDir, 'img', 'favicon.ico'));
+    
+    await FS.copyFile(path.resolve(process.cwd(), 'template', 'js', 'copy-to-clipboard.js'), path.resolve(deployDir, 'js', 'copy-to-clipboard.js'));
+    await FS.copyFile(path.resolve(process.cwd(), 'node_modules/@wcj/dark-mode/main.js'), path.resolve(deployDir, 'js', 'dark-mode.min.js'));
+    await FS.copyFile(path.resolve(process.cwd(), 'node_modules/@uiw/github-corners/lib/index.js'), path.resolve(deployDir, 'js', 'github-corners.js'));
+
     const jsData = await FS.readFileSync(rootIndexJSPath);
     await FS.outputFile(path.resolve(deployDir, 'js', 'index.js'), UglifyJS.minify(jsData.toString()).code)
     const files = await readMarkdownPaths(path.resolve(process.cwd(), 'command'));
@@ -71,6 +77,24 @@ const cssPath = path.resolve(deployDir, 'css', 'index.css');
         command_length: jsonData.data.length
       }
     );
+
+    let svgStr = '';
+    if (FS.existsSync(contributorsPath)) {
+      svgStr = (await FS.readFile(contributorsPath)).toString();
+    }
+
+    await createTmpToHTML(
+      path.resolve(process.cwd(), 'template', 'contributors.ejs'),
+      path.resolve(deployDir, 'contributors.html'),
+      {
+        p: '/contributors.html',
+        n: '搜索',
+        d: '最专业的Linux命令大全，命令搜索引擎，内容包含Linux命令手册、详解、学习，值得收藏的Linux命令速查手册。',
+        arr: jsonData.data,
+        command_length: jsonData.data.length,
+        contributors: svgStr,
+      }
+    );
     
     await Promise.all(jsonData.data.map(async (item, idx) => {
       item.command_length = jsonData.data.length;
@@ -83,9 +107,11 @@ const cssPath = path.resolve(deployDir, 'css', 'index.css');
     }));
 
   } catch (err) {
+    console.log(`\n ERROR :> ${err}\n`)
     if (err && err.message) {
       console.log(`\n ERROR :> ${err.message.red_bt}\n`)
     }
+    process.exit(1);
   }
 })();
 
@@ -192,7 +218,15 @@ const cssPath = path.resolve(deployDir, 'css', 'index.css');
 }
 
 function markdownToHTML(str) {
-  return create({ markdown: str, document: undefined });
+  return create({
+    rewrite: (node) => {
+      if (node.type === 'element' && node.properties?.href && /.md/.test(node.properties.href) && !/^(https?:\/\/)/.test(node.properties.href)) {
+        let href = node.properties.href;
+        node.properties.href = href.replace(/([^\.\/\\]+)\.(md|markdown)/gi, '$1.html');
+      }
+    },
+    markdown: str, document: undefined, 'dark-mode': false
+  });
 }
 
 /**
@@ -204,13 +238,12 @@ function markdownToHTML(str) {
   return new Promise((resolve, reject) => {
     try {
       const stylStr = FS.readFileSync(stylPath, 'utf8');
-      const stylMD = FS.readFileSync(path.resolve('node_modules/markdown-to-html-cli/github.css'), 'utf8');
       stylus(stylStr.toString())
         .set('filename', stylPath)
         .set('compress', true)
         .render((err, css) => {
           if (err) throw err;
-          resolve(`${stylMD.replace(/\n/, '')}\n${css}`);
+          resolve(`${css}`);
         });
     } catch (err) {
       reject(err);
